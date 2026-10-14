@@ -11,14 +11,14 @@ This project combines the **Phase 8 Next.js frontend** and **B7 Express/Mongoose
 
 ```text
 roomrent/
-  apps/
-    web/                 Next.js App Router, UI, live API client, legacy mock modules
-    api/                 Node.js/Express, MongoDB models, routes, auth, finance, workers
+  frontend/            Next.js App Router, UI, live API client, legacy mock modules
+  backend/             Node.js/Express, MongoDB models, routes, auth, finance, workers
   scripts/
     b8-static-qa.cjs     Dependency-free source contract checks
   docs/
     B8_INTEGRATION_REPORT.md
     B8_SECURITY_AND_RELEASE_CHECKLIST.md
+    ROOMRENT_MASTER_QA_REPORT.md
   compose.local.yml     Local MongoDB replica set service
 ```
 
@@ -28,10 +28,10 @@ roomrent/
 2. From the repository root, run `docker compose -f compose.local.yml up -d` (or start your own MongoDB replica set). For a new local Mongo volume, initialize once:
    `docker compose -f compose.local.yml exec mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'`.
    Wait until it reports a primary. Docker networking configurations may require a different replica-set host address.
-3. `cp apps/api/.env.example apps/api/.env`. Replace `JWT_SECRET` with a securely generated 32+ character random secret and set `MONGODB_URI=mongodb://127.0.0.1:27017/roomrent?replicaSet=rs0&directConnection=true`.
-4. `cp apps/web/.env.example apps/web/.env.local`. Set `NEXT_PUBLIC_ROOMRENT_API_MODE=live` and `NEXT_PUBLIC_ROOMRENT_API_URL=http://localhost:5000`.
-5. `npm --prefix apps/api install` and `npm --prefix apps/web ci`.
-6. Start backend with `npm run dev:api` and frontend in a separate terminal with `npm run dev:web`.
+3. `cp backend/.env.example backend/.env`. Replace `JWT_SECRET` with a securely generated 32+ character random secret and set `MONGODB_URI=mongodb://127.0.0.1:27017/roomrent?replicaSet=rs0&directConnection=true`.
+4. `cp frontend/.env.example frontend/.env.local`. Set `NEXT_PUBLIC_ROOMRENT_API_MODE=live` and `NEXT_PUBLIC_ROOMRENT_API_URL=http://localhost:5000`.
+5. `npm --prefix backend install` and `npm --prefix frontend install`.
+6. Start backend with `npm run dev:backend` and frontend in a separate terminal with `npm run dev:frontend` (or root `npm run dev`).
 7. Check `http://localhost:5000/api/health` and `http://localhost:3000/login`.
 
 The owner must create a property and enable **Accept new tenant applications** before tenant enrollment. The owner then adds a floor and room. A registered tenant applies via the catalogue, the owner approves, and **the tenant must sign out and log back in** to obtain the newly linked membership/session. Next create monthly invoices and record/verify an external payment.
@@ -42,13 +42,13 @@ No actual payment gateway is implemented. Payments remain manually verified, and
 
 ```sh
 npm run qa:static
-npm run test:api
-npm --prefix apps/api run test:b8   # requires B8_TEST_MONGO_URI dedicated local replica-set test DB
+npm run test:backend
+npm --prefix backend run test:b8   # requires B8_TEST_MONGO_URI dedicated local replica-set test DB
 npm run typecheck
-npm --prefix apps/web run lint
-npm run test:web
-npm run build:web
-npm --prefix apps/web run test:e2e
+npm --prefix frontend run lint
+npm run test:frontend
+npm run build:frontend
+npm --prefix frontend run test:e2e
 ```
 
 The integration test must use a disposable `roomrent_b8_test` database; it drops the database for isolation and intentionally refuses remote Atlas URIs. Example:
