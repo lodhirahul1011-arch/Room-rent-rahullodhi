@@ -1,0 +1,9 @@
+export type Property = { id: string; name: string; location: string; address: string; createdAt: string };
+export type Floor = { id: string; propertyId: string; name: string; order: number };
+export type Room = { id: string; propertyId: string; floorId: string; number: string; rentPaise: number; status: 'active' | 'maintenance' };
+export type Tenant = { id: string; name: string; phone: string; email: string; emergencyContact: string; notes: string };
+export type Tenancy = { id: string; tenantId: string; roomId: string; moveIn: string; moveOut: string | null; status: 'active' | 'ended' };
+export type EnrollmentStatus = 'pending' | 'approved' | 'rejected';
+export type EnrollmentDocument = { id: string; name: string; type: string; size: number; category: 'identity' | 'photo' | 'other' };
+export type Enrollment = { id: string; applicantName: string; phone: string; email: string; emergencyContact: string; address: string; propertyId: string; roomId: string; moveIn: string; submittedAt: string; status: EnrollmentStatus; documents: EnrollmentDocument[]; rejectionReason: string; decisionAt: string | null; approvedTenantId: string | null; approvedTenancyId: string | null };
+export type Portfolio = { enrollments?: Enrollment[]; properties: Property[]; floors: Floor[]; rooms: Room[]; tenants: Tenant[]; tenancies: Tenancy[] };

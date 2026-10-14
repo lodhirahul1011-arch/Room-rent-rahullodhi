@@ -1,0 +1,15 @@
+const test=require('node:test'),assert=require('node:assert/strict');const R=require('../src/core/b5-rules');
+test('accepts real PDF magic header',()=>assert.equal(R.validUpload(Buffer.from('%PDF-1.7\n'), 'application/pdf'),true));
+test('rejects spoofed PDF MIME',()=>assert.equal(R.validUpload(Buffer.from('not a pdf'), 'application/pdf'),false));
+test('accepts PNG signature',()=>assert.equal(R.validUpload(Buffer.from([137,80,78,71,13,10,26,10,1]),'image/png'),true));
+test('rejects unsupported MIME',()=>assert.equal(R.validUpload(Buffer.from('abc'),'text/plain'),false));
+test('rejects empty files',()=>assert.equal(R.validUpload(Buffer.alloc(0),'application/pdf'),false));
+test('normalizes unsafe filename characters',()=>assert.equal(R.safeFilename('../secret\\name.pdf'),'.._secret_name.pdf'));
+test('hash is stable',()=>assert.equal(R.hash(Buffer.from('a')),R.hash(Buffer.from('a'))));
+test('reminder due today',()=>assert.equal(R.reminderCategory('2026-10-14','2026-10-14'),'due'));
+test('reminder three days ahead',()=>assert.equal(R.reminderCategory('2026-10-17','2026-10-14'),'upcoming'));
+test('reminder 15 days overdue',()=>assert.equal(R.reminderCategory('2026-09-29','2026-10-14'),'overdue-15'));
+test('no reminder on other days',()=>assert.equal(R.reminderCategory('2026-10-25','2026-10-14'),null));
+test('tenant cannot download another tenant file',()=>assert.equal(R.recipientPermission({role:'tenant',tenantId:'1',organizationId:'A'},{tenantId:'2',organizationId:'A'}),false));
+test('tenant may download linked file',()=>assert.equal(R.recipientPermission({role:'tenant',tenantId:'1',organizationId:'A'},{tenantId:'1',organizationId:'A'}),true));
+test('owner cannot download cross-organization file',()=>assert.equal(R.recipientPermission({role:'owner',organizationId:'A'},{organizationId:'B'}),false));

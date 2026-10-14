@@ -1,0 +1,16 @@
+RoomRent B8 — Executed local checks (2026-10-14)
+
+Frontend Phase 8 direct smoke checks: 24/24 PASSED (source-level finance/lifecycle scenarios)
+B8 source/route smoke checks: 37/37 PASSED
+Frontend TS/TSX syntax/transpilation: 193 files PASSED (syntax only; NOT typecheck)
+B8 source security contracts: 17/17 PASSED (static only, not HTTP security tests)
+Backend pure Node test suite: 69 PASSED, 0 FAILED, 2 SKIPPED (B7/B8 require local MongoDB and dependencies)
+Backend JavaScript node --check: PASSED
+
+Blocked/unverified:
+- npm install timed out (registry unreachable in sandbox)
+- Full web TypeScript typecheck, ESLint, Vitest, Next.js build, Playwright, production HTTP+MongoDB E2E and load/concurrency tests could not be completed.
+- Local Docker and mongod executables not present, so replica-set execution was not attempted here.
+- Real video and concurrent calling intentionally out of scope.
+
+NO production readiness claim is made.

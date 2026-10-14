@@ -1,0 +1,14 @@
+const test=require('node:test');const assert=require('node:assert/strict');
+const F=require('../src/core/finance-rules');
+test('monthly bounds account for leap years',()=>{assert.equal(F.monthBounds('2028-02').last,'2028-02-29');assert.equal(F.monthBounds('2027-02').last,'2027-02-28')});
+test('invalid billing months fail',()=>assert.throws(()=>F.monthBounds('2026-00')));
+test('due dates restrict day to 28',()=>{assert.equal(F.dueDate('2026-10',5),'2026-10-05');assert.throws(()=>F.dueDate('2026-10',31))});
+test('money must be integer paise',()=>{assert.equal(F.money(1000),1000);assert.throws(()=>F.money(10.5));assert.throws(()=>F.money(Number.MAX_SAFE_INTEGER+1))});
+test('payment references are normalized',()=>assert.equal(F.normalizeReference('  AbC123  '),'abc123'));
+test('payment amount cannot exceed due',()=>{assert.equal(F.allocationPlan(15000,7000),7000);assert.throws(()=>F.allocationPlan(200,300))});
+test('deposit settlements preserve conservation',()=>{assert.equal(F.settlementAmount(100000,12000),88000);assert.throws(()=>F.settlementAmount(500,501))});
+test('meter readings may not decrease',()=>{assert.equal(F.meterAmount(100,125,800),20000);assert.throws(()=>F.meterAmount(125,100,800))});
+test('sum invoice line items in paise',()=>assert.equal(F.sum([{amountPaise:120000},{amountPaise:10000}]),130000));
+test('penalty after 15 grace days',()=>{assert.equal(F.penaltyAmount(100000,15,{graceDays:15,mode:'fixed',value:5000}),0);assert.equal(F.penaltyAmount(100000,16,{graceDays:15,mode:'fixed',value:5000}),5000)});
+test('reject impossible date',()=>assert.throws(()=>F.ensureDate('2026-02-30')));
+test('outstanding calculation',()=>assert.equal(F.outstanding(100000,10000,5000,70000),45000));

@@ -1,0 +1,9 @@
+const r=require('express').Router();const M=require('../../models');const {auth,roles}=require('../../core/auth');const {asyncRoute,fail}=require('../../core/errors');
+r.use(auth,roles('tenant'));
+r.get('/rooms',asyncRoute(async(req,res)=>{if(!req.actor.organizationId)fail(403,'Membership required');const tenancies=await M.Tenancy.find({organizationId:req.actor.organizationId,tenantId:req.actor.tenantId,status:'active'});const rooms=await M.Room.find({_id:{$in:tenancies.map(x=>x.roomId)},organizationId:req.actor.organizationId});res.json({data:rooms})}));
+r.get('/profile',asyncRoute(async(req,res)=>{if(!req.actor.tenantId)fail(404,'Tenant profile not linked');const tenant=await M.Tenant.findOne({_id:req.actor.tenantId,organizationId:req.actor.organizationId});if(!tenant)fail(404,'Tenant not found');res.json({data:tenant})}));
+r.get('/tenancies',asyncRoute(async(req,res)=>{if(!req.actor.tenantId)fail(404,'Tenant profile not linked');res.json({data:await M.Tenancy.find({tenantId:req.actor.tenantId,organizationId:req.actor.organizationId}).sort({createdAt:-1})})}));
+r.get('/ledger',asyncRoute(async(req,res)=>{if(!req.actor.tenantId)fail(404,'Tenant profile not linked');const entries=await M.LedgerEntry.find({tenantId:req.actor.tenantId,organizationId:req.actor.organizationId}).sort({occurredAt:1,_id:1});let balancePaise=0;res.json({data:entries.map(entry=>{balancePaise+=entry.debitPaise-entry.creditPaise;return {...entry.toObject(),balancePaise}})})}));
+r.get('/payments',asyncRoute(async(req,res)=>{if(!req.actor.tenantId)fail(404,'Tenant profile not linked');res.json({data:await M.Payment.find({tenantId:req.actor.tenantId,organizationId:req.actor.organizationId}).sort({createdAt:-1})})}));
+r.get('/enrollments',asyncRoute(async(req,res)=>res.json({data:await M.Enrollment.find({applicantUserId:req.actor.id}).select('-documents').sort({createdAt:-1})})));
+module.exports=r;

@@ -1,0 +1,17 @@
+{
+  "name": "roomrent-integrated-b8",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "npm --prefix apps/api run dev",
+    "test:api": "npm --prefix apps/api test",
+    "test:finance": "npm --prefix apps/api test",
+    "test:integration": "npm --prefix apps/api run test:b8",
+    "test:web": "npm --prefix apps/web test",
+    "typecheck": "npm --prefix apps/web run typecheck",
+    "build:web": "npm --prefix apps/web run build",
+    "qa:static": "node scripts/b8-static-qa.cjs",
+    "qa:contracts": "node scripts/b8-security-contracts.cjs"
+  }
+}

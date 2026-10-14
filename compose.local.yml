@@ -1,0 +1,11 @@
+# Local-only single-node MongoDB replica set. Not a production deployment.
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - roomrent_mongodb:/data/db
+volumes:
+  roomrent_mongodb:

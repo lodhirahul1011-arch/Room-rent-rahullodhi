@@ -1,0 +1,8 @@
+const test=require('node:test');const assert=require('node:assert/strict');
+const {validDate,assertMoveIn,assertMoveOut,occupancy,roomMatchesFloor,canSubmitEnrollment}=require('../src/core/lifecycle');
+test('reject invalid calendar dates',()=>{for(const d of ['2026-02-30','2025-02-29','2026-13-01','2026-1-01','not-date'])assert.equal(validDate(d),false);assert.equal(validDate('2028-02-29'),true)});
+test('move-in date must be valid',()=>{assert.throws(()=>assertMoveIn('2026-02-30'));assert.equal(assertMoveIn('2026-03-01'),'2026-03-01')});
+test('move-out cannot precede move-in',()=>{assert.throws(()=>assertMoveOut('2026-09-10','2026-09-09'));assert.equal(assertMoveOut('2026-09-10','2026-09-10'),'2026-09-10')});
+test('occupancy derives from maintenance and tenancy',()=>{assert.equal(occupancy({status:'active'},false),'vacant');assert.equal(occupancy({status:'active'},true),'occupied');assert.equal(occupancy({status:'maintenance'},false),'maintenance')});
+test('room must belong to floor/property/organization',()=>{assert.equal(roomMatchesFloor({propertyId:'a',organizationId:'o'},{propertyId:'a',organizationId:'o'}),true);assert.equal(roomMatchesFloor({propertyId:'a',organizationId:'o'},{propertyId:'b',organizationId:'o'}),false)});
+test('enrollment requires matching property, organization and active room',()=>{const property={_id:'p',organizationId:'org'};assert.equal(canSubmitEnrollment({property,room:{propertyId:'p',organizationId:'org',status:'active'}}),true);assert.equal(canSubmitEnrollment({property,room:{propertyId:'p',organizationId:'other',status:'active'}}),false);assert.equal(canSubmitEnrollment({property,room:{propertyId:'p',organizationId:'org',status:'maintenance'}}),false)});

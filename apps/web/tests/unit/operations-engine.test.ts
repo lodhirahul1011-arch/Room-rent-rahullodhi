@@ -1,0 +1,14 @@
+import {describe,it,expect} from 'vitest';
+import {initialOperations,createTicket,updateTicket,addDocument,reviewDocument,collectDeposit,settleDeposit,summarizeFinancial} from '../../features/operations/engine';
+import {initialFinance} from '../../features/finance/engine';
+import type {Portfolio} from '../../features/property-management/types';
+const portfolio:Portfolio={properties:[{id:'p1',name:'P',location:'City',address:'Address',createdAt:'2026-01-01'}],floors:[{id:'f1',propertyId:'p1',name:'Floor 1',order:1}],rooms:[{id:'r1',propertyId:'p1',floorId:'f1',number:'101',rentPaise:1200000,status:'active'}],tenants:[{id:'t1',name:'Demo',phone:'9999999999',email:'demo@example.com',emergencyContact:'',notes:''}],tenancies:[{id:'lease1',roomId:'r1',tenantId:'t1',moveIn:'2026-01-01',moveOut:null,status:'active'}]};
+describe('Phase 6 operations',()=>{
+ it('links complaint to actual room and sends owner notice',()=>{const x=createTicket(initialOperations(),portfolio,'t1','Tap leaking','There is water leaking','plumbing');expect(x.tickets[0].roomId).toBe('r1');expect(x.notices[0].recipientRole).toBe('owner')});
+ it('rejects complaint without active lease',()=>expect(()=>createTicket(initialOperations(),{...portfolio,tenancies:[]},'t1','Tap leaking','There is water leaking','plumbing')).toThrow());
+ it('enforces complaint lifecycle and notifies tenant',()=>{const x=createTicket(initialOperations(),portfolio,'t1','Tap leaking','There is water leaking','plumbing');expect(()=>updateTicket(x,x.tickets[0].id,'resolved','Fixed')).toThrow();const y=updateTicket(x,x.tickets[0].id,'in-progress','Technician assigned');const z=updateTicket(y,x.tickets[0].id,'resolved','Fixed');expect(z.tickets[0].status).toBe('resolved');expect(z.notices[0].recipientRole).toBe('tenant')});
+ it('stores document metadata only and requires rejection reason',()=>{const x=addDocument(initialOperations(),'t1','identity',{name:'demo.png',size:300,type:'image/png'});expect(x.documents[0].file).not.toHaveProperty('content');expect(()=>reviewDocument(x,x.documents[0].id,false)).toThrow()});
+ it('prevents duplicate collection and early settlement',()=>{const x=collectDeposit(initialOperations(),portfolio,'lease1',100000);expect(()=>collectDeposit(x,portfolio,'lease1',100000)).toThrow();expect(()=>settleDeposit(x,portfolio,x.deposits[0].id,[])).toThrow()});
+ it('settles after move-out with no over-deduction',()=>{const x=collectDeposit(initialOperations(),portfolio,'lease1',100000);const ended={...portfolio,tenancies:[{...portfolio.tenancies[0],status:'ended' as const,moveOut:'2026-10-10'}]};expect(()=>settleDeposit(x,ended,x.deposits[0].id,[{reason:'damage',amountPaise:200000}])).toThrow();expect(settleDeposit(x,ended,x.deposits[0].id,[{reason:'cleaning',amountPaise:25000}]).deposits[0].refundPaise).toBe(75000)});
+ it('returns zero financial totals without invoices',()=>expect(summarizeFinancial(portfolio,initialFinance()).paid).toBe(0));
+});

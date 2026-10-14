@@ -1,0 +1,7 @@
+const test=require('node:test');const a=require('node:assert/strict');const {buildIceServers}=require('../src/core/ice-credentials');
+const secret='very-long-infrastructure-secret-with-32-plus-chars';
+test('empty config returns no fake TURN infrastructure',()=>a.deepEqual(buildIceServers({actorId:'owner'}).iceServers,[]));
+test('STUN and TURN URLs generate time-limited credentials',()=>{const r=buildIceServers({actorId:'owner',stunUrls:'stun:example.com:3478',turnUrls:'turn:example.com:3478,turns:example.com:5349',turnSecret:secret,ttlSeconds:3600,now:0});a.equal(r.iceServers.length,2);a.deepEqual(r.iceServers[0].urls,['stun:example.com:3478']);a.deepEqual(r.iceServers[1].urls,['turn:example.com:3478','turns:example.com:5349']);a.equal(r.iceServers[1].username,'3600:owner');a.ok(r.iceServers[1].credential.length>20);a.equal(r.credentialsExpireAt,'1970-01-01T01:00:00.000Z')});
+test('TURN configured without strong secret is denied',()=>a.throws(()=>buildIceServers({actorId:'owner',turnUrls:'turn:example.com',turnSecret:'short'})));
+test('malformed ICE server URLs rejected',()=>a.throws(()=>buildIceServers({actorId:'owner',stunUrls:'https://untrusted.example'})));
+test('TURN password differs between actors and time windows',()=>{const make=(actorId,now)=>buildIceServers({actorId,turnUrls:'turn:example.com',turnSecret:secret,now}).iceServers[0].credential;a.notEqual(make('owner',0),make('tenant',0));a.notEqual(make('owner',0),make('owner',5000))});

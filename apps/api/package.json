@@ -1,0 +1,33 @@
+{
+  "name": "roomrent-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check src/server.js",
+    "worker": "node src/worker.js",
+    "test:b7": "node --test tests/b7-*.test.js",
+    "test:integration": "node -e \"if(!process.env.B7_TEST_MONGO_URI){console.error('B7_TEST_MONGO_URI required for integration');process.exit(1)}\" && node --test tests/b7-integration.test.js",
+    "test:b8": "node --test tests/b8-http-integration.test.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "mongoose": "^8.24.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "dotenv": "^16.6.1",
+    "zod": "^3.24.2",
+    "multer": "^1.4.5-lts.2",
+    "pdfkit": "^0.16.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

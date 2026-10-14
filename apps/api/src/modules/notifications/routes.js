@@ -1,0 +1,3 @@
+const r=require('express').Router(),M=require('../../models');const {auth}=require('../../core/auth'),{asyncRoute,fail}=require('../../core/errors');r.use(auth);
+r.get('/',asyncRoute(async(req,res)=>{if(!req.actor.organizationId)fail(403,'Organization required');res.json({data:await M.Notification.find({organizationId:req.actor.organizationId,userId:req.actor.id}).sort({createdAt:-1}).limit(100)})}));
+r.patch('/:id/read',asyncRoute(async(req,res)=>{const n=await M.Notification.findOneAndUpdate({_id:req.params.id,userId:req.actor.id,organizationId:req.actor.organizationId},{$set:{readAt:new Date()}},{new:true});if(!n)fail(404,'Notification not found');res.json({data:n})}));module.exports=r;
