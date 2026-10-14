@@ -2,7 +2,7 @@ const r=require('express').Router();
 const mongoose=require('mongoose');const {z}=require('zod');const m=require('../../models');
 const {auth,roles}=require('../../core/auth');const {asyncRoute,fail}=require('../../core/errors');const {parse}=require('../../core/validation');
 const {assertMoveIn,assertMoveOut,occupancy}=require('../../core/lifecycle');
-r.use(auth,roles('owner','manager'));
+r.use(['/properties', '/floors', '/rooms', '/tenants', '/tenancies'], auth, roles('owner','manager'));
 const owned=req=>{if(!req.actor.organizationId)fail(403,'Organization required');return req.actor.organizationId};
 const oid=mongoose.isValidObjectId;
 const ensure=async(Model,id,org,session)=>{if(!oid(id))fail(400,'Invalid ID');let q=Model.findOne({_id:id,organizationId:org});if(session)q=q.session(session);const doc=await q;if(!doc)fail(404,'Not found');return doc};

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "check": "node --check src/server.js",
     "worker": "node src/worker.js",
     "test:b7": "node --test tests/b7-*.test.js",

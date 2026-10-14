@@ -5,9 +5,12 @@
  * No WebRTC/media or concurrent calling tests are included by design.
  */
 const test=require('node:test');const assert=require('node:assert/strict');
-const uri=process.env.B8_TEST_MONGO_URI||'';
-const allowed=/\/roomrent_b8_test(?:\?|$)/.test(uri)&&!/(mongodb\+srv|\.mongodb\.net)/.test(uri);
-test('B8 complete HTTP: tenant enrollment, isolation, billing, partial payment, ledger and vacancy',{skip:!allowed?'B8_TEST_MONGO_URI must point to local disposable roomrent_b8_test replica-set DB':undefined,timeout:150000},async()=>{
+require('dotenv').config();
+const dns=require('node:dns');
+try { dns.setServers(['1.1.1.1', '8.8.8.8']); } catch (_) {}
+const uri=process.env.B8_TEST_MONGO_URI||process.env.MONGODB_URI||'';
+const allowed=/\/roomrent_b8_test(?:\?|$)/.test(uri);
+test('B8 complete HTTP: tenant enrollment, isolation, billing, partial payment, ledger and vacancy',{skip:!allowed?'B8_TEST_MONGO_URI must point to disposable roomrent_b8_test replica-set DB':undefined,timeout:150000},async()=>{
  process.env.MONGODB_URI=uri;process.env.JWT_SECRET='b8-integration-test-only-key-longer-than-32-chars';process.env.CORS_ORIGINS='http://localhost:3000';
  const mongoose=require('mongoose');const M=require('../src/models');const app=require('../src/app');
  await mongoose.connect(uri,{serverSelectionTimeoutMS:10000});

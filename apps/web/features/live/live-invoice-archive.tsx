@@ -27,7 +27,7 @@ export function LiveInvoiceArchive({invoiceId}:{invoiceId:string}) {
           unwrap(request<Archive[]>(`/api/invoices/${encodeURIComponent(invoiceId)}/pdfs`))
         ]);
         if(!active)return;
-        const found=invoices.find(x=>idOf(x)===invoiceId);
+        const found = invoices.find((x: Invoice) => idOf(x) === invoiceId);
         if(!found)throw new Error('Invoice is not available for this account');
         setInvoice(found);setRevisions(history);setArchives(files);
       } catch(e){if(active)setError(e instanceof Error?e.message:'Could not load invoice history')}
@@ -39,9 +39,9 @@ export function LiveInvoiceArchive({invoiceId}:{invoiceId:string}) {
     setBusy(revision);setError('');
     try{
       const existing=archives.find(x=>x.revision===revision);
-      const file=existing||await unwrap(request<Archive>(`/api/invoices/${encodeURIComponent(invoiceId)}/pdf?revision=${revision}`,json('POST',{})));
-      if(!existing)setArchives(prev=>[...prev,file]);
-      await downloadPrivateFile(String(file.fileAssetId),`roomrent-invoice-v${revision}.pdf`);
+      const file=existing||await unwrap<Archive>(request<Archive>(`/api/invoices/${encodeURIComponent(invoiceId)}/pdf?revision=${revision}`,json('POST',{})));
+      if(!existing&&file)setArchives(prev=>[...prev,file]);
+      if(file?.fileAssetId)await downloadPrivateFile(String(file.fileAssetId),`roomrent-invoice-v${revision}.pdf`);
     }catch(e){setError(e instanceof Error?e.message:'PDF archive failed')}
     finally{setBusy(null)}
   }

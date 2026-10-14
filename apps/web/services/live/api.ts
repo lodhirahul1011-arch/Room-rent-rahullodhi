@@ -39,7 +39,10 @@ export async function request<T>(path:string,options:RequestInit={},canRefresh=t
   return response.json() as Promise<T>;
 }
 export const json=(method:'POST'|'PATCH'|'DELETE',value?:unknown):RequestInit=>({method,...(value!==undefined?{body:JSON.stringify(value)}:{})});
-export const unwrap=async<T>(promise:Promise<ApiEnvelope<T>>):Promise<T>=>(await promise).data;
+export const unwrap = async <T>(promise: Promise<ApiEnvelope<T> | T>): Promise<T> => {
+  const r = (await promise) as any;
+  return r && typeof r === 'object' && 'data' in r ? (r.data as T) : (r as T);
+};
 export function idOf(record:{_id?:string;id?:string}):string{return String(record._id||record.id||'');}
 /** Downloads a protected PDF/document with the session's bearer token. */
 export async function downloadPrivateFile(fileAssetId:string,filename='roomrent-file'){

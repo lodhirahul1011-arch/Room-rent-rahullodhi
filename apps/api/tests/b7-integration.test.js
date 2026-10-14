@@ -5,6 +5,9 @@
  * NEVER use production records. Requires npm install, a replica set, and socket.io-client.
  */
 const test=require('node:test');const assert=require('node:assert/strict');
+require('dotenv').config();
+const dns=require('node:dns');
+try { dns.setServers(['1.1.1.1', '8.8.8.8']); } catch (_) {}
 const uri=process.env.B7_TEST_MONGO_URI||'';
 const permitted=/\/roomrent_b7_test(?:\?|$)/.test(uri);
 test('B7 real HTTP, Socket.IO and MongoDB participant isolation', {skip:!permitted?'B7_TEST_MONGO_URI for disposable replica-set DB not configured':undefined,timeout:120000}, async()=>{
