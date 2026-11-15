@@ -25,13 +25,40 @@ r.post('/',roles('tenant','owner','manager'),enrollmentUpload,asyncRoute(async(r
 r.post('/:id/documents',roles('tenant'),enrollmentUpload,asyncRoute(async(req,res)=>{
  if(!oid(req.params.id))fail(400,'Invalid enrollment ID');const identity=req.files?.identityDocument?.[0],photo=req.files?.photograph?.[0];if(!identity||!photo)fail(400,'Upload both an identity PDF and a photograph');
  if(identity.mimetype!=='application/pdf'||!rules.validUpload(identity.buffer,identity.mimetype))fail(400,'Identity document must be a valid PDF (max 10 MB)');if(!['image/jpeg','image/png'].includes(photo.mimetype)||!rules.validUpload(photo.buffer,photo.mimetype))fail(400,'Photograph must be a valid JPG or PNG image (max 10 MB)');
- const e=await Enrollment.findOne({_id:req.params.id,applicantUserId:req.actor.id});if(!e)fail(404,'Application not found');if(e.status!=='pending')fail(409,'Only pending applications can update enrollment documents');
+ const e=await Enrollment.findOne({_id:req.params.id,applicantUserId:req.actor.id});if(!e)fail(404,'Application not found');if(e.status!=='pending'&&!e.documentsReuploadRequested)fail(409,'The owner has not requested updated enrollment documents');
  const stored=[],created=[];const prior=e.documents.filter(d=>d.fileAssetId).map(d=>String(d.fileAssetId));
- try{const documents=[];for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:e.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});created.push(asset.id);documents.push({name:asset.originalName,type:asset.mime,size:asset.size,category,fileAssetId:asset.id})}e.documents=[...e.documents.filter(d=>!['identity','photo'].includes(d.category)),...documents];await e.save()}catch(err){await FileAsset.deleteMany({_id:{$in:created}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
+ try{const documents=[];for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:e.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});created.push(asset.id);documents.push({name:asset.originalName,type:asset.mime,size:asset.size,category,fileAssetId:asset.id})}e.documents=[...e.documents.filter(d=>!['identity','photo'].includes(d.category)),...documents];e.documentsReuploadRequested=false;e.documentsReuploadReason='';await e.save()}catch(err){await FileAsset.deleteMany({_id:{$in:created}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
  if(prior.length){const oldAssets=await FileAsset.find({_id:{$in:prior}}).select('storageKey');await FileAsset.deleteMany({_id:{$in:prior}});await Promise.all(oldAssets.map(asset=>storage.remove(asset.storageKey).catch(()=>{})))}res.json({data:e});
 }));
 r.get('/mine',roles('tenant'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({applicantUserId:req.actor.id}).sort({createdAt:-1}).limit(100)})));
 r.get('/',roles('owner','manager'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({organizationId:req.actor.organizationId}).sort({createdAt:-1}).limit(500)})));
+r.post('/:id/documents/request',roles('owner','manager'),asyncRoute(async(req,res)=>{
+ if(!oid(req.params.id))fail(400,'Invalid enrollment ID');
+ const b=parse(z.object({reason:z.string().trim().min(4).max(500)}).strict(),req.body);
+ const e=await Enrollment.findOneAndUpdate({_id:req.params.id,organizationId:req.actor.organizationId,applicantUserId:{$exists:true}},{$set:{documentsReuploadRequested:true,documentsReuploadReason:b.reason}},{new:true});
+ if(!e)fail(404,'Linked tenant application not found');
+ await AuditLog.create({organizationId:e.organizationId,actorId:req.actor.id,event:'enrollment.documents.reupload_requested',entityType:'Enrollment',entityId:String(e.id),details:{reason:b.reason}});
+ res.json({data:{id:e.id,documentsReuploadRequested:true}});
+}));
+r.patch('/:id/documents/:category',roles('owner','manager'),asyncRoute(async(req,res)=>{
+ if(!oid(req.params.id))fail(400,'Invalid enrollment ID');
+ const b=parse(z.object({name:z.string().trim().min(1).max(200)}).strict(),req.body);
+ const e=await Enrollment.findOne({_id:req.params.id,organizationId:req.actor.organizationId});if(!e)fail(404,'Application not found');
+ const doc=e.documents.find(item=>item.category===req.params.category);if(!doc)fail(404,'Application document not found');
+ doc.name=rules.safeFilename(b.name);await e.save();
+ if(doc.fileAssetId)await FileAsset.updateOne({_id:doc.fileAssetId,organizationId:e.organizationId},{$set:{originalName:doc.name}});
+ await AuditLog.create({organizationId:e.organizationId,actorId:req.actor.id,event:'enrollment.document.updated',entityType:'Enrollment',entityId:String(e.id),details:{category:doc.category,name:doc.name}});
+ res.json({data:{id:e.id,name:doc.name}});
+}));
+r.delete('/:id/documents/:category',roles('owner','manager'),asyncRoute(async(req,res)=>{
+ if(!oid(req.params.id))fail(400,'Invalid enrollment ID');
+ const e=await Enrollment.findOne({_id:req.params.id,organizationId:req.actor.organizationId});if(!e)fail(404,'Application not found');
+ const index=e.documents.findIndex(item=>item.category===req.params.category);if(index<0)fail(404,'Application document not found');
+ const [doc]=e.documents.splice(index,1);e.documentsReuploadRequested=true;e.documentsReuploadReason='A document was removed by the owner. Please upload the identity PDF and photograph again.';await e.save();
+ if(doc.fileAssetId){const asset=await FileAsset.findOne({_id:doc.fileAssetId,organizationId:e.organizationId});if(asset){await FileAsset.deleteOne({_id:asset.id});await storage.remove(asset.storageKey).catch(()=>{})}}
+ await AuditLog.create({organizationId:e.organizationId,actorId:req.actor.id,event:'enrollment.document.deleted',entityType:'Enrollment',entityId:String(e.id),details:{category:doc.category}});
+ res.status(204).end();
+}));
 r.post('/:id/reject',roles('owner','manager'),asyncRoute(async(req,res)=>{
  if(!oid(req.params.id))fail(400,'Invalid ID');const b=parse(z.object({reason:z.string().trim().min(4).max(1000)}).strict(),req.body);
  const doc=await Enrollment.findOneAndUpdate({_id:req.params.id,organizationId:req.actor.organizationId,status:'pending'},{$set:{status:'rejected',rejectionReason:b.reason,decisionAt:new Date()}},{new:true});if(!doc)fail(409,'Request missing or already decided');

@@ -13,7 +13,27 @@ const item=z.object({kind:z.enum(['rent','electricity','maintenance','other']),l
 async function invoiceFor(req,invoiceId,session){const invoice=await M.Invoice.findOne({_id:invoiceId,organizationId:org(req)}).session(session||null);if(!invoice)fail(404,'Invoice not found');ensureOwnerOrTenant(req,invoice.tenantId);return invoice}
 async function audit(req,event,type,entityId,details,session){await M.AuditLog.create([{organizationId:org(req),actorId:req.actor.id,event,entityType:type,entityId:String(entityId),details}],{session})}
 
-r.post('/invoices/generate',owner,asyncRoute(async(req,res)=>{const b=parse(z.object({month:z.string(),dueDay:z.number().int().min(1).max(28).default(5)}),req.body);const {first,last}=F.monthBounds(b.month);const organizationId=org(req);const tenancies=await M.Tenancy.find({organizationId,moveIn:{$lte:last},$or:[{moveOut:null},{moveOut:{$gte:first}}]});const results=[];for(const t of tenancies){const result=await runTx(async session=>{const room=await M.Room.findOne({_id:t.roomId,organizationId}).session(session);if(!room)fail(409,'Tenancy room missing');const key=`${t.id}:${b.month}`;if(await M.Invoice.exists({organizationId,key}).session(session))return null;const originalItems=await initialInvoiceItems(organizationId,room,t,b.month,session);const total=F.sum(originalItems);const [invoice]=await M.Invoice.create([{organizationId,key,tenancyId:t.id,tenantId:t.tenantId,propertyId:room.propertyId,roomId:room.id,month:b.month,issuedAt:first,dueDate:F.dueDate(b.month,b.dueDay),originalItems}],{session});await M.LedgerEntry.create([{organizationId,tenantId:t.tenantId,invoiceId:invoice.id,sourceType:'invoice',sourceId:String(invoice.id),debitPaise:total,creditPaise:0,description:'Invoice '+b.month}],{session});await recordRevision(invoice,'original','Original invoice',session,req.actor.id);await audit(req,'invoice.created','Invoice',invoice.id,{month:b.month},session);return invoice});if(result)results.push(result)}res.status(201).json({created:results.length,data:results})}));
+r.post('/invoices/generate',owner,asyncRoute(async(req,res)=>{
+  const b=parse(z.object({month:z.string(),dueDay:z.number().int().min(1).max(28).default(5),otherCharges:z.array(z.object({tenancyId:id,label:z.string().trim().min(2).max(180),amountPaise:amount}).strict()).max(200).default([])}).strict(),req.body);
+  const {first,last}=F.monthBounds(b.month),organizationId=org(req);
+  const tenancies=await M.Tenancy.find({organizationId,moveIn:{$lte:last},$or:[{moveOut:null},{moveOut:{$gte:first}}]});
+  const tenancyIds=new Set(tenancies.map(t=>String(t.id)));
+  if(b.otherCharges.some(charge=>!tenancyIds.has(charge.tenancyId)))fail(400,'An extra charge references a tenancy outside this billing period');
+  const chargesByTenancy=new Map();
+  for(const charge of b.otherCharges){const rows=chargesByTenancy.get(charge.tenancyId)||[];rows.push({kind:'other',label:charge.label,amountPaise:charge.amountPaise});chargesByTenancy.set(charge.tenancyId,rows)}
+  const results=[];
+  for(const t of tenancies){
+    const result=await runTx(async session=>{
+      const room=await M.Room.findOne({_id:t.roomId,organizationId}).session(session);if(!room)fail(409,'Tenancy room missing');
+      const key=`${t.id}:${b.month}`;if(await M.Invoice.exists({organizationId,key}).session(session))return null;
+      const originalItems=[...await initialInvoiceItems(organizationId,room,t,b.month,session),...(chargesByTenancy.get(String(t.id))||[])];
+      const total=F.sum(originalItems);const [invoice]=await M.Invoice.create([{organizationId,key,tenancyId:t.id,tenantId:t.tenantId,propertyId:room.propertyId,roomId:room.id,month:b.month,issuedAt:first,dueDate:F.dueDate(b.month,b.dueDay),originalItems}],{session});
+      await M.LedgerEntry.create([{organizationId,tenantId:t.tenantId,invoiceId:invoice.id,sourceType:'invoice',sourceId:String(invoice.id),debitPaise:total,creditPaise:0,description:'Invoice '+b.month}],{session});
+      await recordRevision(invoice,'original','Original invoice',session,req.actor.id);await audit(req,'invoice.created','Invoice',invoice.id,{month:b.month,otherCharges:chargesByTenancy.get(String(t.id))||[]},session);return invoice
+    });if(result)results.push(result)
+  }
+  res.status(201).json({created:results.length,data:results})
+}));
 r.get('/invoices', asyncRoute(async (req, res) => {
   const q = { organizationId: org(req) };
   if (req.actor.role === 'tenant') {
@@ -43,15 +63,16 @@ r.get('/invoices', asyncRoute(async (req, res) => {
     penaltyByInvoice.set(key, (penaltyByInvoice.get(key) || 0) + row.amountPaise);
   }
   res.json({ data: invoices.map((invoice) => {
-    const basePaise = F.sum(invoice.originalItems.filter((item) => item.kind !== 'electricity'));
+    const basePaise = F.sum(invoice.originalItems.filter((item) => item.kind === 'rent'));
     const originalElectricityPaise = F.sum(invoice.originalItems.filter((item) => item.kind === 'electricity'));
+    const originalOtherChargesPaise = F.sum(invoice.originalItems.filter((item) => item.kind !== 'rent' && item.kind !== 'electricity'));
     const charges = byInvoice.get(String(invoice.id)) || { electricityPaise: 0, otherChargesPaise: 0 };
     const penaltyPaise = penaltyByInvoice.get(String(invoice.id)) || 0;
     return {
       ...invoice.toObject(), basePaise,
       electricityPaise: originalElectricityPaise + charges.electricityPaise,
-      otherChargesPaise: charges.otherChargesPaise, penaltyPaise,
-      totalPaise: basePaise + originalElectricityPaise + charges.electricityPaise + charges.otherChargesPaise + penaltyPaise,
+      otherChargesPaise: originalOtherChargesPaise + charges.otherChargesPaise, penaltyPaise,
+      totalPaise: basePaise + originalElectricityPaise + originalOtherChargesPaise + charges.electricityPaise + charges.otherChargesPaise + penaltyPaise,
     };
   }) });
 }));

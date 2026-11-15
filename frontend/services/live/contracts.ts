@@ -4,7 +4,7 @@ export interface Floor{_id?:string;id?:string;propertyId:string;name:string;orde
 export interface Room{_id?:string;id?:string;propertyId:string;floorId:string;number:string;rentPaise:number;status:'active'|'maintenance';occupancy?:'occupied'|'vacant'|'maintenance'}
 export interface Tenant{_id?:string;id?:string;name:string;phone:string;email:string;emergencyContact?:string;notes?:string}
 export interface Tenancy{_id?:string;id?:string;tenantId:string;roomId:string;roomNumber?:string;propertyName?:string;propertyLocation?:string;moveIn:string;moveOut?:string|null;status:'active'|'ended'}
-export interface Enrollment{_id?:string;id?:string;applicantName:string;phone:string;email:string;emergencyContact?:string;address?:string;propertyId:string;roomId:string;moveIn:string;status:string;rejectionReason?:string;createdAt?:string;documents?:Array<{category:string;name:string;type:string;size:number;fileAssetId?:string}>}
+export interface Enrollment{_id?:string;id?:string;applicantName:string;phone:string;email:string;emergencyContact?:string;address?:string;propertyId:string;roomId:string;moveIn:string;status:string;rejectionReason?:string;documentsReuploadRequested?:boolean;documentsReuploadReason?:string;approvedTenantId?:string;createdAt?:string;documents?:Array<{category:string;name:string;type:string;size:number;fileAssetId?:string}>}
 export interface Invoice{_id?:string;id?:string;tenantId:string;tenancyId?:string;propertyId?:string;roomId?:string;month:string;dueDate:string;originalItems:Array<{kind:string;label:string;amountPaise:number}>;basePaise?:number;electricityPaise?:number;otherChargesPaise?:number;penaltyPaise?:number;totalPaise?:number;status:string}
 export interface Payment{_id?:string;id?:string;invoiceId:string;tenantId:string;amountPaise:number;method:string;reference:string;status:string;rejectionReason?:string}
 export interface Ticket{_id?:string;id?:string;propertyId:string;roomId:string;tenantId:string;title:string;description:string;status:string}
@@ -25,7 +25,7 @@ export const live={
   updateEnrollmentDocuments:(id:string,payload:FormData)=>unwrap(request<Enrollment>(`/api/enrollments/${encodeURIComponent(id)}/documents`,{method:'POST',body:payload})),
   decide:(id:string,kind:'approve'|'reject',reason?:string)=>unwrap(request<unknown>(`/api/enrollments/${id}/${kind}`,json('POST',kind==='reject'?{reason}:{}))),
   moveOut:(id:string,moveOut:string)=>unwrap(request<Tenancy>(`/api/tenancies/${id}/move-out`,json('POST',{moveOut}))),
-  invoices:(month:string,dueDay=5)=>unwrap(request<unknown>('/api/invoices/generate',json('POST',{month,dueDay}))),
+  invoices:(month:string,dueDay=5,otherCharges:Array<{tenancyId:string;label:string;amountPaise:number}>=[])=>unwrap(request<unknown>('/api/invoices/generate',json('POST',{month,dueDay,otherCharges}))),
   balance:(invoiceId:string)=>unwrap(request<{invoiceId:string;balancePaise:number;totalPaise:number;paidPaise:number}>(`/api/invoices/${invoiceId}/balance`)),
   verifyPayment:(id:string)=>unwrap(request<unknown>(`/api/payments/${id}/verify`,json('POST',{}))),
   rejectPayment:(id:string,reason:string)=>unwrap(request<unknown>(`/api/payments/${id}/reject`,json('POST',{reason}))),
