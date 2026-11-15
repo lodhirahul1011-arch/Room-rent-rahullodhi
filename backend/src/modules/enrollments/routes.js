@@ -1,12 +1,16 @@
 const r=require('express').Router(),mongoose=require('mongoose');const {z}=require('zod');
-const {Enrollment,Property,Room,Tenant,Tenancy,AuditLog,Membership}=require('../../models');
+const {Enrollment,Property,Room,Tenant,Tenancy,AuditLog,Membership,FileAsset}=require('../../models');
 const {auth,roles}=require('../../core/auth');const {parse}=require('../../core/validation');
-const {assertMoveIn,canSubmitEnrollment}=require('../../core/lifecycle');const {asyncRoute,fail}=require('../../core/errors');
+const {assertMoveIn,canSubmitEnrollment}=require('../../core/lifecycle');const {asyncRoute,fail}=require('../../core/errors');const multer=require('multer'),rules=require('../../core/b5-rules'),storage=require('../../core/private-storage');
 const oid=mongoose.isValidObjectId;const objectId=z.string().refine(oid,'Invalid ID');
 const form=z.object({applicantName:z.string().trim().min(2).max(150),phone:z.string().min(8).max(30),email:z.string().email(),emergencyContact:z.string().min(8).max(100),address:z.string().min(5).max(500),propertyId:objectId,roomId:objectId,moveIn:z.string(),documents:z.array(z.object({name:z.string().min(1).max(200),type:z.string().max(120),size:z.number().int().positive().max(10*1024*1024),category:z.enum(['identity','photo','other'])}).strict()).min(2).max(12)}).strict();
+const enrollmentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:2,fields:2}}).fields([{name:'identityDocument',maxCount:1},{name:'photograph',maxCount:1}]);
 r.use(auth);
-r.post('/',roles('tenant','owner','manager'),asyncRoute(async(req,res)=>{
- const b=parse(form,req.body);assertMoveIn(b.moveIn);
+r.post('/',roles('tenant','owner','manager'),enrollmentUpload,asyncRoute(async(req,res)=>{
+ const uploaded=req.files||{},identity=uploaded.identityDocument?.[0],photo=uploaded.photograph?.[0];let b;
+ if(req.body.payload){let submitted;try{submitted=JSON.parse(req.body.payload)}catch{fail(400,'Invalid enrollment form data')}const values=parse(form.omit({documents:true}),submitted);if(!identity||!photo)fail(400,'Upload both an identity PDF and a photograph');if(identity.mimetype!=='application/pdf'||!rules.validUpload(identity.buffer,identity.mimetype))fail(400,'Identity document must be a valid PDF (max 10 MB)');if(!['image/jpeg','image/png'].includes(photo.mimetype)||!rules.validUpload(photo.buffer,photo.mimetype))fail(400,'Photograph must be a valid JPG or PNG image (max 10 MB)');b={...values,documents:[{name:rules.safeFilename(identity.originalname),type:identity.mimetype,size:identity.size,category:'identity'},{name:rules.safeFilename(photo.originalname),type:photo.mimetype,size:photo.size,category:'photo'}]}}
+ else b=parse(form,req.body);
+ assertMoveIn(b.moveIn);
  const [property,room]=await Promise.all([Property.findById(b.propertyId),Room.findById(b.roomId)]);
  if(!canSubmitEnrollment({property,room}))fail(404,'Property or room unavailable');
  if(!property.acceptingEnrollments)fail(409,'Property is not accepting enrollment requests');
@@ -14,9 +18,19 @@ r.post('/',roles('tenant','owner','manager'),asyncRoute(async(req,res)=>{
  if(!b.documents.some(d=>d.category==='identity')||!b.documents.some(d=>d.category==='photo'))fail(400,'Identity and photo metadata required');
  if(req.actor.role==='tenant'&&await Enrollment.exists({applicantUserId:req.actor.id,status:'pending'}))fail(409,'You already have a pending enrollment');
  const existing=await Tenancy.exists({roomId:room.id,status:'active'});if(existing)fail(409,'Room occupied');
- const e=await Enrollment.create({...b,organizationId:property.organizationId,applicantUserId:req.actor.role==='tenant'?req.actor.id:undefined});res.status(201).json({data:e});
+ const e=new Enrollment({...b,organizationId:property.organizationId,applicantUserId:req.actor.role==='tenant'?req.actor.id:undefined});const stored=[];
+ try{if(identity&&photo){for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:property.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});e.documents.find(d=>d.category===category).fileAssetId=asset.id}}await e.save()}catch(err){await FileAsset.deleteMany({storageKey:{$in:stored}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
+ res.status(201).json({data:e});
 }));
-r.get('/mine',roles('tenant'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({applicantUserId:req.actor.id}).select('-documents').sort({createdAt:-1}).limit(100)})));
+r.post('/:id/documents',roles('tenant'),enrollmentUpload,asyncRoute(async(req,res)=>{
+ if(!oid(req.params.id))fail(400,'Invalid enrollment ID');const identity=req.files?.identityDocument?.[0],photo=req.files?.photograph?.[0];if(!identity||!photo)fail(400,'Upload both an identity PDF and a photograph');
+ if(identity.mimetype!=='application/pdf'||!rules.validUpload(identity.buffer,identity.mimetype))fail(400,'Identity document must be a valid PDF (max 10 MB)');if(!['image/jpeg','image/png'].includes(photo.mimetype)||!rules.validUpload(photo.buffer,photo.mimetype))fail(400,'Photograph must be a valid JPG or PNG image (max 10 MB)');
+ const e=await Enrollment.findOne({_id:req.params.id,applicantUserId:req.actor.id});if(!e)fail(404,'Application not found');if(e.status!=='pending')fail(409,'Only pending applications can update enrollment documents');
+ const stored=[],created=[];const prior=e.documents.filter(d=>d.fileAssetId).map(d=>String(d.fileAssetId));
+ try{const documents=[];for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:e.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});created.push(asset.id);documents.push({name:asset.originalName,type:asset.mime,size:asset.size,category,fileAssetId:asset.id})}e.documents=[...e.documents.filter(d=>!['identity','photo'].includes(d.category)),...documents];await e.save()}catch(err){await FileAsset.deleteMany({_id:{$in:created}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
+ if(prior.length){const oldAssets=await FileAsset.find({_id:{$in:prior}}).select('storageKey');await FileAsset.deleteMany({_id:{$in:prior}});await Promise.all(oldAssets.map(asset=>storage.remove(asset.storageKey).catch(()=>{})))}res.json({data:e});
+}));
+r.get('/mine',roles('tenant'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({applicantUserId:req.actor.id}).sort({createdAt:-1}).limit(100)})));
 r.get('/',roles('owner','manager'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({organizationId:req.actor.organizationId}).sort({createdAt:-1}).limit(500)})));
 r.post('/:id/reject',roles('owner','manager'),asyncRoute(async(req,res)=>{
  if(!oid(req.params.id))fail(400,'Invalid ID');const b=parse(z.object({reason:z.string().trim().min(4).max(1000)}).strict(),req.body);

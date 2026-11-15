@@ -9,14 +9,14 @@ r.post('/documents/:tenantId',upload.single('file'),asyncRoute(async(req,res)=>{
  if(req.actor.role==='tenant'&&String(req.actor.tenantId)!==String(tenant.id))fail(403,'Tenant access denied');
  if(!['tenant','owner','manager'].includes(req.actor.role))fail(403,'Forbidden');
  if(!req.file||!rules.validUpload(req.file.buffer,req.file.mimetype))fail(400,'Unsupported or invalid PDF, PNG or JPEG (max 10 MB)');
- const key=await storage.write(req.file.buffer);let asset;
+ const key=await storage.write(req.file.buffer,{mime:req.file.mimetype});let asset;
  try{asset=await M.FileAsset.create({organizationId:org(req),ownerUserId:req.actor.id,tenantId:tenant.id,relatedType:'tenant',relatedId:String(tenant.id),kind:String(req.body.kind||'identity').slice(0,40),originalName:rules.safeFilename(req.file.originalname),mime:req.file.mimetype,size:req.file.size,sha256:rules.hash(req.file.buffer),storageKey:key,createdBy:req.actor.id});
  await M.Document.create({organizationId:org(req),tenantId:tenant.id,fileAssetId:asset.id,name:asset.originalName,kind:asset.kind,storageKey:key,status:'pending'});
  }catch(err){await storage.remove(key);throw err}
  res.status(201).json({data:{id:asset.id,name:asset.originalName,mime:asset.mime,size:asset.size}})
 }));
 r.get('/:id/download',asyncRoute(async(req,res)=>{
- const asset=await M.FileAsset.findById(req.params.id);if(!asset||!rules.recipientPermission(req.actor,asset))fail(404,'File not found');
- if(asset.kind==='meter-photo')await require('../meters/service').authorizedPhoto(req.actor,asset.relatedId,asset.id);const data=await storage.read(asset.storageKey);res.set('Cache-Control','no-store');res.set('X-Content-Type-Options','nosniff');res.set('Content-Type',asset.mime);res.set('Content-Disposition',rules.contentDisposition(asset.originalName));res.send(data)
+ const asset=await M.FileAsset.findById(req.params.id);let allowed=asset&&rules.recipientPermission(req.actor,asset);if(asset&&asset.relatedType==='enrollment'&&req.actor.role==='tenant')allowed=!!await M.Enrollment.exists({_id:asset.relatedId,organizationId:asset.organizationId,applicantUserId:req.actor.id});if(!asset||!allowed)fail(404,'File not found');
+ if(asset.kind==='meter-photo')await require('../meters/service').authorizedPhoto(req.actor,asset.relatedId,asset.id);const data=await storage.read(asset.storageKey);res.set('Cache-Control','no-store');res.set('X-Content-Type-Options','nosniff');res.set('Content-Type',asset.mime);res.set('Content-Disposition',rules.contentDisposition(asset.originalName,req.query.inline==='1'));res.send(data)
 }));
 module.exports=r;

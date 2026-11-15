@@ -3,6 +3,9 @@ const bcrypt=require('bcryptjs');const {z}=require('zod');const mongoose=require
 const {User,Organization,Membership,AuthSession,AuditLog,Tenant}=require('../../models');
 const {parse}=require('../../core/validation');const {asyncRoute,fail}=require('../../core/errors');
 const {auth,roles}=require('../../core/auth');const {createSession,issueAccess,refreshHash,randomRefresh}=require('../../core/session');
+const {PasswordResetToken}=require('../../models');
+const {sendResendEmail}=require('../support/resend');
+const crypto=require('node:crypto');
 const credentials=z.object({email:z.string().email().transform(x=>x.trim().toLowerCase()),password:z.string().min(10)});
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const viewMembership=m=>({organizationId:m.organizationId,role:m.role,tenantId:m.tenantId||null});
@@ -22,6 +25,38 @@ r.post('/register-tenant',asyncRoute(async(req,res)=>{
  if(await User.exists({email:b.email}))fail(409,'Email already exists');
  const user=await User.create({email:b.email,name:b.name,passwordHash:await bcrypt.hash(b.password,12),role:'tenant'});
  res.status(201).json({user:publicUser(user)});
+}));
+r.post('/forgot-password',asyncRoute(async(req,res)=>{
+ const b=parse(z.object({email:z.string().email().transform(x=>x.trim().toLowerCase())}),req.body);
+ const {RESEND_API_KEY,RESEND_FROM_EMAIL}=process.env;
+ if(!RESEND_API_KEY||!RESEND_FROM_EMAIL)fail(503,'Password recovery email is not configured. Contact the administrator.');
+ const user=await User.findOne({email:b.email,active:true});
+ if(user){
+  await PasswordResetToken.deleteMany({userId:user.id,consumedAt:null});
+  const token=crypto.randomBytes(32).toString('base64url');
+  const tokenHash=crypto.createHash('sha256').update(token).digest('hex');
+  await PasswordResetToken.create({userId:user.id,tokenHash,expiresAt:new Date(Date.now()+30*60*1000)});
+  const configuredBase=process.env.FRONTEND_URL||(process.env.CORS_ORIGINS||'http://localhost:3000').split(',')[0];
+  const base=configuredBase.replace(/\/$/,'');
+  const resetUrl=`${base}/reset-password?token=${encodeURIComponent(token)}`;
+  try{await sendResendEmail({from:RESEND_FROM_EMAIL,to:user.email,subject:'Reset your RoomRent password',text:`Use this link to reset your password. It expires in 30 minutes: ${resetUrl}`,html:`<p>We received a request to reset your RoomRent password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in 30 minutes. If you did not request this, ignore this email.</p>`})}
+  catch(error){await PasswordResetToken.deleteOne({tokenHash});console.error('[Password reset email failed]:',error.message);fail(503,'Password reset email could not be sent. Check the mail configuration and try again.')}
+ }
+ res.json({message:'If an active account uses that email, a password reset link has been sent.'});
+}));
+r.post('/reset-password',asyncRoute(async(req,res)=>{
+ const b=parse(z.object({token:z.string().min(32).max(256),newPassword:z.string().min(12).max(128)}),req.body);
+ const tokenHash=crypto.createHash('sha256').update(b.token).digest('hex');
+ const passwordHash=await bcrypt.hash(b.newPassword,12);const session=await mongoose.startSession();
+ try{await session.withTransaction(async()=>{
+  const reset=await PasswordResetToken.findOne({tokenHash,consumedAt:null,expiresAt:{$gt:new Date()}}).session(session);
+  if(!reset)fail(400,'Reset link is invalid or expired. Request a new one.');
+  reset.consumedAt=new Date();await reset.save({session});
+  const user=await User.findOne({_id:reset.userId,active:true}).session(session);if(!user)fail(400,'Reset link is invalid or expired. Request a new one.');
+  user.passwordHash=passwordHash;await user.save({session});
+  await AuthSession.updateMany({userId:user.id,revokedAt:null},{$set:{revokedAt:new Date()}},{session});
+ });}finally{await session.endSession()}
+ res.json({message:'Password updated. Sign in with your new password.'});
 }));
 r.post('/login',asyncRoute(async(req,res)=>{
  const b=parse(credentials,req.body);

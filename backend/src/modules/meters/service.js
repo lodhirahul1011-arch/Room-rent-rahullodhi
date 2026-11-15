@@ -337,7 +337,10 @@ async function photoAsset(actor, reading, fileId, session) {
     relatedId: String(reading.id),
     kind: "meter-photo",
   }).session(session || null);
-  if (!asset || !asset.storageKey.startsWith("s3:"))
+  if (
+    !asset ||
+    !(asset.storageKey.startsWith("s3:") || asset.storageKey.startsWith("ik:"))
+  )
     fail(
       409,
       "A successfully stored permanent meter reference photo is required",

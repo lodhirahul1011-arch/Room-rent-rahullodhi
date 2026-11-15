@@ -56,7 +56,7 @@ const baselineSchema = z.object({
   baselineReason: z
     .string()
     .trim()
-    .min(5, "Explain how the initial baseline was verified"),
+    .min(5, "Enter at least 5 characters explaining how the initial reading was checked"),
 });
 type Values = z.infer<typeof schema>;
 type Baseline = z.infer<typeof baselineSchema>;
@@ -379,8 +379,8 @@ function LiveElectricitySection({
           {!config?.durableStorageConfigured && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               Permanent private photo storage is not configured. Drafts without
-              photos can be saved; photo upload and finalization require the
-              S3-compatible storage settings.
+              photos can be saved; photo upload and finalization require valid
+              ImageKit or S3-compatible storage settings.
             </p>
           )}
           {!meter ? (
@@ -451,6 +451,9 @@ function LiveElectricitySection({
                     className={input}
                     {...baseline.register("baselineReason")}
                   />
+                  <span className="mt-1 block text-xs text-slate-500">
+                    Use at least 5 characters, for example: verified from meter photo.
+                  </span>
                 </label>
               </div>
               {Object.values(baseline.formState.errors).map((e, i) => (

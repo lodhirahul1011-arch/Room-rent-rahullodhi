@@ -6,11 +6,42 @@ const { fail } = require("./errors");
 function root() {
   return path.resolve(config().fileRoot);
 }
+function imageKitConfigured() {
+  return !!(
+    process.env.IMAGE_KIT_PRIVATE_KEY &&
+    process.env.IMAGE_KIT_URL_ENDPOINT
+  );
+}
+function imageKitLocation(key) {
+  try {
+    const parsed = JSON.parse(Buffer.from(key.slice(3), "base64url").toString());
+    const endpoint = new URL(process.env.IMAGE_KIT_URL_ENDPOINT);
+    const url = new URL(parsed.url);
+    if (
+      typeof parsed.fileId !== "string" ||
+      url.protocol !== "https:" ||
+      url.origin !== endpoint.origin ||
+      !url.pathname.startsWith(endpoint.pathname.replace(/\/$/, "") + "/")
+    )
+      throw Error();
+    return { fileId: parsed.fileId, url, endpoint };
+  } catch {
+    fail(500, "Invalid ImageKit private file reference");
+  }
+}
+function imageKitAuthorization() {
+  return (
+    "Basic " +
+    Buffer.from(process.env.IMAGE_KIT_PRIVATE_KEY + ":").toString("base64")
+  );
+}
 function location(key) {
   if (!/^[a-f0-9]{32}$/.test(key)) throw Error("Invalid storage key");
   return path.join(root(), key);
 }
 function durableConfigured() {
+  if (process.env.PRIVATE_STORAGE_DRIVER === "imagekit")
+    return imageKitConfigured();
   return (
     process.env.PRIVATE_STORAGE_DRIVER === "s3" &&
     !!process.env.S3_BUCKET &&
@@ -71,6 +102,49 @@ function objectLocation(key) {
   }
 }
 async function write(buffer, options = {}) {
+  if (process.env.PRIVATE_STORAGE_DRIVER === "imagekit") {
+    if (!imageKitConfigured())
+      fail(503, "ImageKit private storage is not configured");
+    const extension =
+      options.mime === "application/pdf"
+        ? "pdf"
+        : options.mime === "image/png"
+          ? "png"
+          : "jpg";
+    const body = new FormData();
+    const fileName = `roomrent-${crypto.randomBytes(16).toString("hex")}.${extension}`;
+    body.set(
+      "file",
+      new Blob([buffer], { type: options.mime || "application/octet-stream" }),
+      fileName,
+    );
+    body.set("fileName", fileName);
+    body.set("folder", "/roomrent-private");
+    body.set("useUniqueFileName", "true");
+    body.set("isPrivateFile", "true");
+    try {
+      const response = await fetch(
+        "https://upload.imagekit.io/api/v2/files/upload",
+        {
+          method: "POST",
+          headers: { Authorization: imageKitAuthorization() },
+          body,
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+      if (!response.ok) throw Error();
+      const uploaded = await response.json();
+      if (!uploaded.fileId || !uploaded.url) throw Error();
+      return (
+        "ik:" +
+        Buffer.from(
+          JSON.stringify({ fileId: uploaded.fileId, url: uploaded.url }),
+        ).toString("base64url")
+      );
+    } catch {
+      fail(503, "ImageKit private upload failed; the file was not saved");
+    }
+  }
   if (options.durable && !durableConfigured()) client();
   if (durableConfigured()) {
     const c = client();
@@ -111,6 +185,25 @@ async function write(buffer, options = {}) {
   return key;
 }
 async function read(key) {
+  if (key.startsWith("ik:")) {
+    const { url, endpoint } = imageKitLocation(key);
+    const expires = Math.floor(Date.now() / 1000) + 60;
+    const relativePath = url.pathname.slice(endpoint.pathname.replace(/\/$/, "").length).replace(/^\//, "");
+    const signature = crypto
+      .createHmac("sha1", process.env.IMAGE_KIT_PRIVATE_KEY)
+      .update(relativePath + expires)
+      .digest("hex");
+    url.search = "";
+    url.searchParams.set("ik-t", String(expires));
+    url.searchParams.set("ik-s", signature);
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw Error();
+      return Buffer.from(await response.arrayBuffer());
+    } catch {
+      fail(503, "ImageKit private file is temporarily unavailable");
+    }
+  }
   if (!key.startsWith("s3:")) return fs.readFile(location(key));
   const c = client();
   try {
@@ -124,6 +217,23 @@ async function read(key) {
   }
 }
 async function remove(key) {
+  if (key.startsWith("ik:")) {
+    const { fileId } = imageKitLocation(key);
+    try {
+      const response = await fetch(
+        `https://api.imagekit.io/v1/files/${encodeURIComponent(fileId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: imageKitAuthorization() },
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (!response.ok && response.status !== 404) throw Error();
+    } catch {
+      fail(503, "ImageKit private file could not be removed");
+    }
+    return;
+  }
   if (!key.startsWith("s3:")) return fs.rm(location(key), { force: true });
   const c = client();
   try {
