@@ -13,6 +13,26 @@ type Notice = {
   relatedInvoiceId?: string;
   meterReadingId?: string;
 };
+function destination(row: Notice, role: "owner" | "tenant" | "admin") {
+  if (row.type === "electricity" && row.relatedInvoiceId)
+    return role === "owner"
+      ? "/owner/invoices?meterInvoice=" + row.relatedInvoiceId
+      : "/tenant/invoices";
+  if (role === "tenant") {
+    if (row.type === "invoice" && row.relatedInvoiceId) return "/tenant/invoices";
+    if (row.type === "payment") return "/tenant/payments";
+    if (row.type === "maintenance") return "/tenant/maintenance";
+    if (row.type === "document") return "/tenant/documents";
+    if (row.type === "tenancy") return "/tenant/my-room";
+    return "/tenant/notifications";
+  }
+  if (row.type === "payment") return "/owner/payments";
+  if (row.type === "enrollment") return "/owner/enrollments";
+  if (row.type === "maintenance") return "/owner/maintenance";
+  if (row.type === "document") return "/owner/documents";
+  if (row.type === "invoice") return "/owner/invoices";
+  return "/owner/notifications";
+}
 export function LiveNotificationBell({
   role,
 }: {
@@ -34,10 +54,16 @@ export function LiveNotificationBell({
     const update = () => void refresh();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, 60000);
+    }, 15000);
+    window.addEventListener("focus", update);
+    window.addEventListener("roomrent:notification-updated", update);
+    document.addEventListener("visibilitychange", update);
     window.addEventListener("roomrent:meter-updated", update);
     return () => {
       clearInterval(timer);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("roomrent:notification-updated", update);
+      document.removeEventListener("visibilitychange", update);
       window.removeEventListener("roomrent:meter-updated", update);
     };
   }, [refresh]);
@@ -74,7 +100,7 @@ export function LiveNotificationBell({
         <Bell className="h-5 w-5" />
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">
-            {unread}
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
@@ -106,15 +132,7 @@ export function LiveNotificationBell({
             {rows.map((row) => (
               <Link
                 key={row._id}
-                href={
-                  row.type === "electricity" && row.relatedInvoiceId
-                    ? role === "owner"
-                      ? "/owner/invoices?meterInvoice=" + row.relatedInvoiceId
-                      : "/tenant/invoices"
-                    : role === "owner"
-                      ? "/owner/notifications"
-                      : "/tenant/notifications"
-                }
+                href={destination(row, role)}
                 onClick={() => {
                   void read(row);
                   setOpen(false);

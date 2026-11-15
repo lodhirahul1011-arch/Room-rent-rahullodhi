@@ -1,7 +1,8 @@
 const r=require('express').Router(),mongoose=require('mongoose');const {z}=require('zod');
-const {Enrollment,Property,Room,Tenant,Tenancy,AuditLog,Membership,FileAsset}=require('../../models');
+const {Enrollment,Property,Room,Tenant,Tenancy,AuditLog,Membership,FileAsset,Notification}=require('../../models');
 const {auth,roles}=require('../../core/auth');const {parse}=require('../../core/validation');
 const {assertMoveIn,canSubmitEnrollment}=require('../../core/lifecycle');const {asyncRoute,fail}=require('../../core/errors');const multer=require('multer'),rules=require('../../core/b5-rules'),storage=require('../../core/private-storage');
+const {notifyOrganizationRole,notifyTenant}=require('../../core/notifications');
 const oid=mongoose.isValidObjectId;const objectId=z.string().refine(oid,'Invalid ID');
 const form=z.object({applicantName:z.string().trim().min(2).max(150),phone:z.string().min(8).max(30),email:z.string().email(),emergencyContact:z.string().min(8).max(100),address:z.string().min(5).max(500),propertyId:objectId,roomId:objectId,moveIn:z.string(),documents:z.array(z.object({name:z.string().min(1).max(200),type:z.string().max(120),size:z.number().int().positive().max(10*1024*1024),category:z.enum(['identity','photo','other'])}).strict()).min(2).max(12)}).strict();
 const enrollmentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:2,fields:2}}).fields([{name:'identityDocument',maxCount:1},{name:'photograph',maxCount:1}]);
@@ -20,6 +21,7 @@ r.post('/',roles('tenant','owner','manager'),enrollmentUpload,asyncRoute(async(r
  const existing=await Tenancy.exists({roomId:room.id,status:'active'});if(existing)fail(409,'Room occupied');
  const e=new Enrollment({...b,organizationId:property.organizationId,applicantUserId:req.actor.role==='tenant'?req.actor.id:undefined});const stored=[];
  try{if(identity&&photo){for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:property.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});e.documents.find(d=>d.category===category).fileAssetId=asset.id}}await e.save()}catch(err){await FileAsset.deleteMany({storageKey:{$in:stored}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
+ if(req.actor.role==='tenant')await notifyOrganizationRole(property.organizationId,['owner','manager'],{type:'enrollment',title:'New tenant application',body:`${e.applicantName} applied for room ${room.number}.`});
  res.status(201).json({data:e});
 }));
 r.post('/:id/documents',roles('tenant'),enrollmentUpload,asyncRoute(async(req,res)=>{
@@ -28,7 +30,7 @@ r.post('/:id/documents',roles('tenant'),enrollmentUpload,asyncRoute(async(req,re
  const e=await Enrollment.findOne({_id:req.params.id,applicantUserId:req.actor.id});if(!e)fail(404,'Application not found');if(e.status!=='pending'&&!e.documentsReuploadRequested)fail(409,'The owner has not requested updated enrollment documents');
  const stored=[],created=[];const prior=e.documents.filter(d=>d.fileAssetId).map(d=>String(d.fileAssetId));
  try{const documents=[];for(const [file,category] of [[identity,'identity'],[photo,'photo']]){const key=await storage.write(file.buffer,{mime:file.mimetype});stored.push(key);const asset=await FileAsset.create({organizationId:e.organizationId,ownerUserId:req.actor.id,relatedType:'enrollment',relatedId:String(e.id),kind:category,originalName:rules.safeFilename(file.originalname),mime:file.mimetype,size:file.size,sha256:rules.hash(file.buffer),storageKey:key,createdBy:req.actor.id});created.push(asset.id);documents.push({name:asset.originalName,type:asset.mime,size:asset.size,category,fileAssetId:asset.id})}e.documents=[...e.documents.filter(d=>!['identity','photo'].includes(d.category)),...documents];e.documentsReuploadRequested=false;e.documentsReuploadReason='';await e.save()}catch(err){await FileAsset.deleteMany({_id:{$in:created}});await Promise.all(stored.map(key=>storage.remove(key).catch(()=>{})));throw err}
- if(prior.length){const oldAssets=await FileAsset.find({_id:{$in:prior}}).select('storageKey');await FileAsset.deleteMany({_id:{$in:prior}});await Promise.all(oldAssets.map(asset=>storage.remove(asset.storageKey).catch(()=>{})))}res.json({data:e});
+ if(prior.length){const oldAssets=await FileAsset.find({_id:{$in:prior}}).select('storageKey');await FileAsset.deleteMany({_id:{$in:prior}});await Promise.all(oldAssets.map(asset=>storage.remove(asset.storageKey).catch(()=>{})))}const room=await Room.findOne({_id:e.roomId,organizationId:e.organizationId}).select('number');await notifyOrganizationRole(e.organizationId,['owner','manager'],{type:'document',title:'Tenant documents updated',body:`${e.applicantName} uploaded updated application documents for room ${room?.number||'—'}.`});res.json({data:e});
 }));
 r.get('/mine',roles('tenant'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({applicantUserId:req.actor.id}).sort({createdAt:-1}).limit(100)})));
 r.get('/',roles('owner','manager'),asyncRoute(async(req,res)=>res.json({data:await Enrollment.find({organizationId:req.actor.organizationId}).sort({createdAt:-1}).limit(500)})));
@@ -38,6 +40,7 @@ r.post('/:id/documents/request',roles('owner','manager'),asyncRoute(async(req,re
  const e=await Enrollment.findOneAndUpdate({_id:req.params.id,organizationId:req.actor.organizationId,applicantUserId:{$exists:true}},{$set:{documentsReuploadRequested:true,documentsReuploadReason:b.reason}},{new:true});
  if(!e)fail(404,'Linked tenant application not found');
  await AuditLog.create({organizationId:e.organizationId,actorId:req.actor.id,event:'enrollment.documents.reupload_requested',entityType:'Enrollment',entityId:String(e.id),details:{reason:b.reason}});
+ if(e.applicantUserId)await Notification.create({organizationId:e.organizationId,userId:e.applicantUserId,type:'document',title:'Owner requested new documents',body:b.reason});
  res.json({data:{id:e.id,documentsReuploadRequested:true}});
 }));
 r.patch('/:id/documents/:category',roles('owner','manager'),asyncRoute(async(req,res)=>{

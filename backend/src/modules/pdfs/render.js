@@ -5,6 +5,8 @@ const { fail } = require("../../core/errors");
 const cash = (n) => (Number(n || 0) / 100).toFixed(2);
 async function buildPdf(invoice, revision, { detailed = false } = {}) {
   const photos = new Map();
+  const room = await M.Room.findOne({ _id: invoice.roomId, organizationId: invoice.organizationId }).select('number propertyId');
+  const property = room && await M.Property.findOne({ _id: room.propertyId, organizationId: invoice.organizationId }).select('name');
   if (detailed)
     for (const meter of revision.meterDetails || []) {
       if (!meter.meterPhotoFileId) continue;
@@ -45,6 +47,8 @@ async function buildPdf(invoice, revision, { detailed = false } = {}) {
       .fillColor("#17241f")
       .fontSize(11)
       .text("Invoice: " + String(invoice.id))
+      .text("Property: " + (property?.name || "Not available"))
+      .text("Room: " + (room?.number || "Not available"))
       .text("Month: " + invoice.month)
       .text("Due date: " + invoice.dueDate)
       .text("Immutable revision: " + revision.revision);

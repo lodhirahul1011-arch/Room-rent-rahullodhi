@@ -5,6 +5,7 @@ const { auth } = require('../../core/auth');
 const { asyncRoute, fail } = require('../../core/errors');
 const rules = require('../../core/b5-rules');
 const storage = require('../../core/private-storage');
+const { notifyOrganizationRole } = require('../../core/notifications');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 4 } });
 r.use(auth);
@@ -55,6 +56,7 @@ r.post('/documents/:tenantId', upload.single('file'), asyncRoute(async (req, res
     await storage.remove(key).catch(() => {});
     throw err;
   }
+  if (req.actor.role === 'tenant') await notifyOrganizationRole(organizationId, ['owner', 'manager'], { type: 'document', title: 'New tenant document', body: `${tenant.name} uploaded ${asset.originalName}.` });
   res.status(201).json({ data: { id: replacement?.id || asset.id, name: asset.originalName, mime: asset.mime, size: asset.size } });
 }));
 

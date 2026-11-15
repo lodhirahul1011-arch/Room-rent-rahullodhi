@@ -35,6 +35,7 @@ export async function request<T>(path:string,options:RequestInit={},canRefresh=t
   const response=await fetch(`${API_BASE}${path}`,{...options,headers,cache:'no-store'});
   if(response.status===401&&canRefresh&&session?.refreshToken&&await refreshAccess())return request<T>(path,options,false);
   if(!response.ok){let body:ApiErrorBody={};try{body=await response.json() as ApiErrorBody}catch{};if(response.status===401)clearSession();throw new ApiError(response.status,body.error?.message||`HTTP ${response.status}`);}
+ if(!['GET','HEAD'].includes((options.method||'GET').toUpperCase())&&typeof window!=='undefined')window.dispatchEvent(new Event('roomrent:notification-updated'));
   if(response.status===204)return undefined as T;
   return response.json() as Promise<T>;
 }

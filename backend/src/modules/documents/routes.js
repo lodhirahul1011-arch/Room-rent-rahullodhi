@@ -5,6 +5,7 @@ const { auth, roles } = require('../../core/auth');
 const { asyncRoute, fail } = require('../../core/errors');
 const { parse } = require('../../core/validation');
 const storage = require('../../core/private-storage');
+const { notifyTenant } = require('../../core/notifications');
 
 r.use(auth);
 function org(req) {
@@ -43,6 +44,7 @@ r.patch('/:id/reupload-request', roles('owner', 'manager'), asyncRoute(async (re
   );
   if (!d) fail(404, 'Document not found');
   await M.AuditLog.create({ organizationId: org(req), actorId: req.actor.id, event: 'document.reupload_requested', entityType: 'Document', entityId: String(d.id), details: { reason: b.reason } });
+  await notifyTenant(org(req), d.tenantId, { type: 'document', title: 'Owner requested a new document', body: b.reason });
   res.json({ data: { id: d.id, status: d.status } });
 }));
 
