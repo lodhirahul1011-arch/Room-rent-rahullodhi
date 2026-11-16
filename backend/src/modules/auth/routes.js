@@ -102,18 +102,24 @@ r.post('/change-password',asyncRoute(async(req,res)=>{
 r.get('/memberships',roles('owner','manager'),asyncRoute(async(req,res)=>res.json({data:await Membership.find({organizationId:req.actor.organizationId}).select('userId organizationId role active tenantId')})));
 r.post('/memberships',roles('owner'),asyncRoute(async(req,res)=>{
  const b=parse(z.object({email:z.string().email().transform(x=>x.toLowerCase()),role:z.enum(['manager','tenant']),tenantId:z.string().optional()}),req.body);
- const user=await User.findOne({email:b.email,active:true});if(!user)fail(404,'User must register first');
+ const user=await User.findOne({email:b.email,active:true});if(!user)fail(404,'Tenant must register this email before the owner can link it');
+ if(b.role==='tenant'&&user.role!=='tenant')fail(409,'This login must be registered as a tenant account');
+ let tenant;
  if(b.role==='tenant'){
   if(!b.tenantId||!mongoose.isValidObjectId(b.tenantId))fail(400,'Linked tenant required');
-  const tenant=await Tenant.findOne({_id:b.tenantId,organizationId:req.actor.organizationId});if(!tenant)fail(404,'Tenant not found');
-  if(tenant.userId&&String(tenant.userId)!==String(user.id))fail(409,'Tenant belongs to another user');
-  await Tenant.updateOne({_id:tenant.id,organizationId:req.actor.organizationId},{$set:{userId:user.id}});
+  tenant=await Tenant.findOne({_id:b.tenantId,organizationId:req.actor.organizationId});if(!tenant)fail(404,'Tenant profile not found');
+  if(tenant.userId&&String(tenant.userId)!==String(user.id))fail(409,'Tenant profile is already linked to a different login');
  }
- const membership=await Membership.create({userId:user.id,organizationId:req.actor.organizationId,role:b.role,tenantId:b.role==='tenant'?b.tenantId:undefined});
+ let membership=await Membership.findOne({userId:user.id,organizationId:req.actor.organizationId});
+ if(membership){
+  if(membership.role!==b.role)fail(409,'This login already has a different role in this organization');
+  if(b.role==='tenant'&&membership.tenantId&&String(membership.tenantId)!==String(tenant.id))fail(409,'This login is already linked to a different tenant profile');
+  membership.active=true;if(b.role==='tenant')membership.tenantId=tenant.id;await membership.save();
+ }else membership=await Membership.create({userId:user.id,organizationId:req.actor.organizationId,role:b.role,tenantId:b.role==='tenant'?tenant.id:undefined});
+ if(tenant&&String(tenant.userId||'')!==String(user.id)){tenant.userId=user.id;await tenant.save()}
  await AuditLog.create({organizationId:req.actor.organizationId,actorId:req.actor.id,event:'membership.created',entityType:'Membership',entityId:membership.id});
- res.status(201).json({data:membership});
-}));
-r.patch('/memberships/:id',roles('owner'),asyncRoute(async(req,res)=>{
+ res.status(201).json({data:membership,message:'Login linked. Ask the tenant to sign out and back in to load their organization access.'});
+}));r.patch('/memberships/:id',roles('owner'),asyncRoute(async(req,res)=>{
  const b=parse(z.object({active:z.boolean()}),req.body);
  const target=await Membership.findOne({_id:req.params.id,organizationId:req.actor.organizationId});if(!target)fail(404,'Membership not found');
  if(target.role==='owner')fail(403,'Owner membership cannot be modified here');

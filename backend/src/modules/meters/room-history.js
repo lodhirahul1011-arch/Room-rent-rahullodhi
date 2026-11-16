@@ -7,7 +7,7 @@ r.use(auth);
 r.get(
   "/:roomId/electricity-history",
   asyncRoute(async (req, res) => {
-    if (!req.actor.organizationId) fail(403, "Membership required");
+    if (!req.actor.organizationId) fail(403, req.actor.role === "tenant" ? "Tenant login is not linked to a tenant profile yet. Ask the property owner to link this login from the Tenant directory." : "Membership required");
     if (!isValidObjectId(req.params.roomId)) fail(400, "Invalid room ID");
     const q = {
       organizationId: req.actor.organizationId,

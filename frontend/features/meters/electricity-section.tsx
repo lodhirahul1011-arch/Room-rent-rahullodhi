@@ -590,6 +590,11 @@ function LiveElectricitySection({
                       {Math.round((config?.photoMaxBytes || 5242880) / 1048576)}{" "}
                       MB · replace selection before saving
                     </span>
+                    {!record?.meterPhotoFileId && !file && (
+                      <span className="mt-1 block text-xs font-medium text-amber-800">
+                        Required to finalize: choose a meter photo. You can still save a draft without it.
+                      </span>
+                    )}
                   </label>
                 )}
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -679,9 +684,16 @@ function LiveElectricitySection({
                       type="button"
                       className={button}
                       data-action-tone="success"
-                      onClick={() =>
-                        void form.handleSubmit(() => setConfirm(true))()
-                      }
+                      onClick={() => {
+                        if (!correcting && !file && !record?.meterPhotoFileId) {
+                          setError(
+                            "Choose a meter reference photo first. Finalization uploads it privately before posting the electricity charge.",
+                          );
+                          fileInput.current?.focus();
+                          return;
+                        }
+                        void form.handleSubmit(() => setConfirm(true))();
+                      }}
                     >
                       {correcting ? "Review correction" : "Finalize Reading"}
                     </button>

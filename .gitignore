@@ -20,6 +20,7 @@ build/
 dist/
 
 # Uploads & temporary runtime files
+.runtime-logs/
 private-uploads/
 uploads/
 backend/.local-mongo-data/

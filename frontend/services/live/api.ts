@@ -5,7 +5,7 @@ export type Role = 'admin' | 'owner' | 'manager' | 'tenant';
 export type SessionInfo = {accessToken:string;refreshToken:string;role:Role;organizationId:string|null;user:{id:string;name:string;email:string;role:string}};
 export type ApiEnvelope<T> = {data:T};
 export type ApiErrorBody = {error?:{code?:string;message?:string}};
-export class ApiError extends Error {constructor(readonly status:number,message:string){super(message);this.name='ApiError';}}
+export class ApiError extends Error {constructor(readonly status:number,message:string,readonly retryAfterMs?:number){super(message);this.name='ApiError';}}
 const STORAGE_KEY='roomrent-b8-session';
 export function currentSession(): SessionInfo|null {
   if(typeof window==='undefined')return null;
@@ -34,7 +34,7 @@ export async function request<T>(path:string,options:RequestInit={},canRefresh=t
   if(options.body && !(options.body instanceof FormData))headers.set('Content-Type','application/json');
   const response=await fetch(`${API_BASE}${path}`,{...options,headers,cache:'no-store'});
   if(response.status===401&&canRefresh&&session?.refreshToken&&await refreshAccess())return request<T>(path,options,false);
-  if(!response.ok){let body:ApiErrorBody={};try{body=await response.json() as ApiErrorBody}catch{};if(response.status===401)clearSession();throw new ApiError(response.status,body.error?.message||`HTTP ${response.status}`);}
+ if(!response.ok){let body:ApiErrorBody={};try{body=await response.json() as ApiErrorBody}catch{};if(response.status===401)clearSession();const retryAfter=Number(response.headers.get('Retry-After'));throw new ApiError(response.status,body.error?.message||`HTTP ${response.status}`,Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:undefined);}
  if(!['GET','HEAD'].includes((options.method||'GET').toUpperCase())&&typeof window!=='undefined')window.dispatchEvent(new Event('roomrent:notification-updated'));
   if(response.status===204)return undefined as T;
   return response.json() as Promise<T>;

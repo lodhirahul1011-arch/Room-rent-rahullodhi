@@ -1,6 +1,6 @@
 const jwt=require('jsonwebtoken');
 const {config}=require('../config');
-const {User,Membership,AuthSession}=require('../models');
+const {User,Membership,AuthSession,Tenant}=require('../models');
 const {fail,asyncRoute}=require('./errors');
 const {allowsRole,inOrganization}=require('./security-utils');
 const {isValidObjectId}=require('mongoose');
@@ -12,9 +12,22 @@ async function resolveUserAccessToken(token){
  if(!user?.active||!session||session.role!==payload.role||String(session.organizationId||'')!==String(payload.organizationId||''))fail(401,'Session revoked or inactive');
  let membership=null;
  if(payload.role==='admin') {if(user.role!=='admin'||payload.organizationId)fail(403,'Invalid admin access')}
- else if(payload.role==='tenant'&&!payload.organizationId){if(user.role!=='tenant')fail(403,'Invalid tenant onboarding session')}
+ else if(payload.role==='tenant'&&!payload.organizationId){
+  if(user.role!=='tenant')fail(403,'Invalid tenant onboarding session');
+  // Tenant sessions created before the owner linked the profile are onboarding
+  // sessions without an organization. Resolve them from the current database
+  // membership so the newly linked tenant does not have to sign in again.
+  const linked=await Membership.find({userId:user.id,role:'tenant',active:true}).limit(2);
+  if(linked.length===1){
+   membership=linked[0];
+   if(!membership.tenantId){
+    const tenant=await Tenant.findOne({userId:user.id,organizationId:membership.organizationId});
+    if(tenant){membership.tenantId=tenant.id;await membership.save()}
+   }
+  }
+ }
  else {membership=await Membership.findOne({userId:user.id,organizationId:payload.organizationId,role:payload.role,active:true});if(!membership)fail(403,'Organization membership revoked')}
- return {id:String(user.id),role:payload.role,organizationId:payload.organizationId||null,tenantId:membership?.tenantId?String(membership.tenantId):null,sessionId:String(session.id)};
+ return {id:String(user.id),role:payload.role,organizationId:membership?.organizationId?String(membership.organizationId):payload.organizationId||null,tenantId:membership?.tenantId?String(membership.tenantId):null,sessionId:String(session.id)};
 }
 const auth=asyncRoute(async(req,res,next)=>{
  const match=(req.headers.authorization||'').match(/^Bearer ([^\s]+)$/i);

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, X } from "lucide-react";
 import { request, unwrap, json } from "@/services/live/api";
 type Notice = {
@@ -41,20 +41,31 @@ export function LiveNotificationBell({
   const [rows, setRows] = useState<Notice[]>([]),
     [open, setOpen] = useState(false),
     [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    try {
-      setRows(await unwrap(request<Notice[]>("/api/notifications")));
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load notifications");
-    }
+  const lastRefreshAt = useRef(0);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refresh = useCallback((force = false) => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    if (!force && Date.now() - lastRefreshAt.current < 2000)
+      return Promise.resolve();
+    lastRefreshAt.current = Date.now();
+    refreshInFlight.current = (async () => {
+      try {
+        setRows(await unwrap(request<Notice[]>("/api/notifications")));
+        setError("");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not load notifications");
+      }
+    })().finally(() => {
+      refreshInFlight.current = null;
+    });
+    return refreshInFlight.current;
   }, []);
   useEffect(() => {
     void refresh();
     const update = () => void refresh();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, 15000);
+    }, 60000);
     window.addEventListener("focus", update);
     window.addEventListener("roomrent:notification-updated", update);
     document.addEventListener("visibilitychange", update);
@@ -94,7 +105,7 @@ export function LiveNotificationBell({
         className="relative rounded-xl p-2.5 text-slate-600"
         onClick={() => {
           setOpen(!open);
-          if (!open) void refresh();
+          if (!open) void refresh(true);
         }}
       >
         <Bell className="h-5 w-5" />

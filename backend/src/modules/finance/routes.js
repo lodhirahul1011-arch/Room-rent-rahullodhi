@@ -5,7 +5,7 @@ const F=require('../../core/finance-rules');
 const {notifyOrganizationRole,notifyTenant}=require('../../core/notifications');
 r.use(auth);
 const owner=roles('owner','manager');
-function org(req){if(!req.actor.organizationId)fail(403,'Membership required');return req.actor.organizationId}
+function org(req){if(!req.actor.organizationId)fail(403,req.actor.role==='tenant'?'Tenant login is not linked to a tenant profile yet. Ask the property owner to link this login from the Tenant directory.':'Membership required');return req.actor.organizationId}
 function ensureOwnerOrTenant(req,tenantId){if(req.actor.role==='tenant'&&String(req.actor.tenantId)!==String(tenantId))fail(403,'Tenant access denied')}
 const {runTx,balanceFor,lockInvoice,recordRevision,initialInvoiceItems}=require('../../core/invoice-accounting');
 const id=z.string().regex(/^[a-f\d]{24}$/i);

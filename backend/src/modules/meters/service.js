@@ -14,7 +14,7 @@ const fileRules = require("../../core/b5-rules");
 const finalized = { $in: ["finalized", "correction"] };
 function org(actor) {
   if (!actor.organizationId)
-    fail(403, "Active organization membership required");
+    fail(403, actor.role === "tenant" ? "Tenant login is not linked to a tenant profile yet. Ask the property owner to link this login from the Tenant directory." : "Active organization membership required");
   return actor.organizationId;
 }
 async function audit(actor, event, id, details, session) {
